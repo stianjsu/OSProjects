@@ -107,7 +107,6 @@ int forkAndExec(char **args) {
 
 int main(/* int argc, char *argv[] */) {
   
-
   while (1) {
     // print the current path
     char cwd[1024];
@@ -121,7 +120,15 @@ int main(/* int argc, char *argv[] */) {
     // get input from user
     
     char input[MAX_INP_LENGTH]; 
+    input[0] = NULL;
     fgets(input, MAX_INP_LENGTH, stdin);
+
+    // If user inputs ctrl + d: break
+    if(input[0] == NULL) {
+      printf("\n");
+      break;
+    }
+
     input[strcspn(input, "\n")] = 0;
 
 
@@ -149,7 +156,8 @@ int main(/* int argc, char *argv[] */) {
     int f = 0;
     //terminate when user enters 0x04
     //terminate when user enters control + D
-    if(args[0] != NULL){
+    //actually terminate when user enters "exit"
+    if(args[0] != NULL) {
       if (strcmp(args[0], "exit") == 0) {
         exit(EXIT_SUCCESS);
       } else if (strcmp(args[0], "cd") == 0) {
@@ -163,8 +171,8 @@ int main(/* int argc, char *argv[] */) {
         perror("Command error");
       }
     }
-
-
   }
+  
+  return EXIT_SUCCESS;
 
 }
