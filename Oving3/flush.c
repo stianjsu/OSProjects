@@ -91,14 +91,16 @@ int forkAndExec(char **args) {
     pid_t pid = fork();
     if (pid == 0) {
       execvp(args[0], args);
+      printf("Could not find command: %s", args[0]);
+      exit(EXIT_FAILURE);  //execvp should exit on its won, if this does not happend we exit with failiure
     } else if (pid < 0) {
       perror("fork() error");
       return 1;
     } else {
-      printf("pid child: %d\n", pid);
+      //printf("pid child: %d\n", pid);
       int status;
-      waitpid ( pid, 0, WUNTRACED);
-      //printf("Exit status [%s] = %d\n", args[0], WEXITSTATUS(status));
+      waitpid ( pid, &status, WUNTRACED);
+      printf("Exit status [%s] = %d\n", args[0], WEXITSTATUS(status));
     } 
     return 0;
 }
@@ -126,6 +128,9 @@ int main(/* int argc, char *argv[] */) {
     // get space-separated arguments from input
     char argsSize[MAX_ARG_COUNT][MAX_SINGLE_ARG_LENGTH];
     char **args = argsSize;
+    for(int i = 0; i < MAX_ARG_COUNT; i++)
+      args[i] = NULL;
+
     int i = 0;
     char *token = strtok(input, " ");
     while (token != NULL) {
@@ -136,7 +141,7 @@ int main(/* int argc, char *argv[] */) {
 
     // print the arguments
     for (int j = 0; j < i; j++) {
-      printf("%d: |%s| \n", j, args[j]);
+      printf("Arg %d: |%s| \n", j, args[j]);
     }
 
     char term = 0x04;
@@ -144,19 +149,19 @@ int main(/* int argc, char *argv[] */) {
     int f = 0;
     //terminate when user enters 0x04
     //terminate when user enters control + D
-    if (strcmp(args[0], "exit") == 0) {
-      exit(EXIT_SUCCESS);
-    } else if (strcmp(args[0], "cd") == 0) {
-      printf("Running cd\n");
-      f = cd(args);
-    } else if (strcmp(args[0], "ls") == 0) {
-      printf("Running ls\n");
-      f = ls(args);
-    }else {
-      f = forkAndExec(args);
-    }
-    if(f == 1) {
-      perror("Command error");
+    if(args[0] != NULL){
+      if (strcmp(args[0], "exit") == 0) {
+        exit(EXIT_SUCCESS);
+      } else if (strcmp(args[0], "cd") == 0) {
+        f = cd(args);
+      } else if (strcmp(args[0], "ls") == 0) {
+        f = ls(args);
+      } else {
+        f = forkAndExec(args);
+      }
+      if(f == 1) {
+        perror("Command error");
+      }
     }
 
 
