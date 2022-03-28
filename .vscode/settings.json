@@ -1,0 +1,12 @@
+{
+  "files.associations": {
+    "semaphore.h": "c",
+    "pthread.h": "c",
+    "stdlib.h": "c",
+    "bbuffer.h": "c",
+    "type_traits": "c",
+    "string.h": "c",
+    "stdio.h": "c",
+    "socket.h": "c"
+  }
+}
