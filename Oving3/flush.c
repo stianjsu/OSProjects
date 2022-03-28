@@ -86,28 +86,47 @@ int printBackground(char *args) {
   return 0;
 } */
 
+// returns 1 if last arg is '&'
+int isBackgroundJob(char **args) {
+  int i = 0;
+  while(args[i] != NULL && i+1 < MAX_ARG_COUNT) {
+    if(strcmp(args[i], "&") == 0 && args[i+1] == NULL){
+      return 1;
+    }
+    i++;
+  }
+  return 0;
+}
+
 int forkAndExec(char **args) {
+  
     //fork and exec
     pid_t pid = fork();
     if (pid == 0) {
       execvp(args[0], args);
-      printf("Could not find command: %s", args[0]);
-      exit(EXIT_FAILURE);  //execvp should exit on its won, if this does not happend we exit with failiure
+      printf("Could not find command: %s\n", args[0]);
+      exit(EXIT_FAILURE);  //execvp should exit on its own, if not exit with failiure
     } else if (pid < 0) {
       perror("fork() error");
       return 1;
     } else {
-      //printf("pid child: %d\n", pid);
-      int status;
-      waitpid ( pid, &status, WUNTRACED);
-      printf("Exit status [%s] = %d\n", args[0], WEXITSTATUS(status));
+      
+      if(!isBackgroundJob(args)) {
+        int status;
+        waitpid ( pid, &status, WUNTRACED);
+        printf("Exit status [%s]: %d\n", args[0], WEXITSTATUS(status));
+      } 
+      
     } 
     return 0;
 }
 
+
+
 int main(/* int argc, char *argv[] */) {
   
   while (1) {
+
     // print the current path
     char cwd[1024];
     if (getcwd(cwd, sizeof(cwd)) != NULL) {
@@ -170,6 +189,12 @@ int main(/* int argc, char *argv[] */) {
       if(f == 1) {
         perror("Command error");
       }
+    }
+
+    //collects any potential zombies before next input prompt
+    int status;
+    while (waitpid (-1, &status, WNOHANG) > 0) {
+      printf("Exit status: %d\n", WEXITSTATUS(status));
     }
   }
   
