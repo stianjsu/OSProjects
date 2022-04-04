@@ -5,6 +5,13 @@
 #define MAX_SINGLE_ARG_LENGTH 32
 #define MAX_ARG_COUNT 16
 #define MAX_INP_LENGTH 512
+#define MAX_NUM_BG 16
+
+char backgroundArgsSize[MAX_NUM_BG][MAX_SINGLE_ARG_LENGTH];
+int bgPID[MAX_NUM_BG];
+char **bgArgs = backgroundArgsSize;
+
+
 
 
 int cd(char **args) {
@@ -29,6 +36,18 @@ int ls(char **args) {
 
 // list all files in directory, if no directory is specified, list current directory
 
+
+int jobs(char **args) {
+  //for each element in bgPID, print out the PID and the element at the same index in bgArgs if not NULL
+  int i;
+  printf("All background processes:\n");
+  printf("PID\t\tCommand\n");
+  for(i = 0; i < MAX_NUM_BG; i++) {
+    if(bgPID[i] != 0) {
+      printf("%d\t\t%s\n", bgPID[i], bgArgs[i]);
+    }
+  }
+}
 
 /*
  void stdoout(char *args) {
@@ -100,30 +119,56 @@ int isBackgroundJob(char **args) {
 
 int forkAndExec(char **args) {
   
-    //fork and exec
-    pid_t pid = fork();
-    if (pid == 0) {
-      execvp(args[0], args);
-      printf("Could not find command: %s\n", args[0]);
-      exit(EXIT_FAILURE);  //execvp should exit on its own, if not exit with failiure
-    } else if (pid < 0) {
-      perror("fork() error");
-      return 1;
-    } else {
-      
-      if(!isBackgroundJob(args)) {
-        int status;
-        waitpid ( pid, &status, WUNTRACED);
-        printf("Exit status [%s]: %d\n", args[0], WEXITSTATUS(status));
-      } 
-      
-    } 
-    return 0;
+  //fork and exec
+  pid_t pid = fork();
+  if (pid == 0) {
+    execvp(args[0], args);
+    printf("Could not find command: %s\n", args[0]);
+    exit(EXIT_FAILURE);  //execvp should exit on its own, if not exit with failiure
+  } else if (pid < 0) {
+    perror("fork() error");
+    return 1;
+  } else {
+    
+    if(!isBackgroundJob(args)) {
+      int status;
+      waitpid ( pid, &status, WUNTRACED);
+      printf("Exit status [%s]: %d\n", args[0], WEXITSTATUS(status));
+    }  else {
+      //find first element of bgPid that is NULL and set it to pid
+      for (int i = 0; i < MAX_NUM_BG; i++) {
+        //printf("%d ", bgPID[i]);
+        if (bgPID[i] == 0) {
+          bgPID[i] = pid;
+          //copy args 0 into bgArgs[i]
+          char *arg;
+          strcpy(arg, args[0]);
+          
+          for (int j = 1; j < MAX_ARG_COUNT; j++) {
+            if (args[j] == NULL) {
+              break;
+            }
+            strcat(arg, " ");
+            strcat(arg, args[j]);
+          } 
+          bgArgs[i] = arg;
+          break;
+        }
+      }
+    }
+  }
+  return 0;
 }
+    
+
 
 
 
 int main(/* int argc, char *argv[] */) {
+  //set all elements in bgPID to NULL
+  for (int i = 0; i < MAX_NUM_BG; i++) {
+    bgPID[i] = 0;
+  }
   
   while (1) {
 
@@ -149,6 +194,11 @@ int main(/* int argc, char *argv[] */) {
     }
 
     input[strcspn(input, "\n")] = 0;
+
+    if(strstr(input, "<") != NULL || strstr(input, ">") != NULL) {
+      //do special parseing for redirection
+      
+    }
 
 
     // get space-separated arguments from input
@@ -178,11 +228,13 @@ int main(/* int argc, char *argv[] */) {
     //actually terminate when user enters "exit"
     if(args[0] != NULL) {
       if (strcmp(args[0], "exit") == 0) {
-        exit(EXIT_SUCCESS);
+        f = 0;
       } else if (strcmp(args[0], "cd") == 0) {
         f = cd(args);
       } else if (strcmp(args[0], "ls") == 0) {
         f = ls(args);
+      } else if (strcmp(args[0], "jobs") == 0) {
+        f = jobs(args);
       } else {
         f = forkAndExec(args);
       }
@@ -193,8 +245,21 @@ int main(/* int argc, char *argv[] */) {
 
     //collects any potential zombies before next input prompt
     int status;
-    while (waitpid (-1, &status, WNOHANG) > 0) {
-      printf("Exit status: %d\n", WEXITSTATUS(status));
+    int pid = waitpid (-1, &status, WNOHANG);
+    while (pid > 0) {
+      for (int i = 0; i < MAX_NUM_BG; i++) {
+        if (bgPID[i] == pid) {
+          printf("Collected zombie with args [%s] and exit status %d\n", bgArgs[i], WEXITSTATUS(status));
+          bgPID[i] = 0;
+          bgArgs[i] = NULL;
+          break;
+        }
+      }
+      pid = waitpid (-1, &status, WNOHANG);
+    }
+
+    if (strcmp(args[0], "exit") == 0) {
+      exit(EXIT_SUCCESS);
     }
   }
   
