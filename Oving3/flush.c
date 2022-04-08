@@ -48,58 +48,62 @@ int jobs(char **args) {
     }
   }
 }
-
-/*
- void stdoout(char *args) {
-  // redirect stdout to file
-  if (strcmp(args[0], ">") == 0) {
-    if (execvp("cat", args) != 0) {
-      perror("cat() error");
-      return 1;
-    }
-  }
-} 
-
-int stdinp(char *args) {
-  // get stdin from file
-  if (strcmp(args[0], "<") == 0) {
-    if (execvp("cat", args) != 0) {
-      perror("cat() error");
-      return 1;
-    }
-  }
-  return 0;
-}
-
-
-int pipe(char *args) {
-  // pipe
-  if (strcmp(args[0], "|") == 0) {
-    if (execvp("cat", args) != 0) {
-      perror("cat() error");
-      return 1;
+/* 
+//redirect input from arg before > to arg after >
+int redirect(char **args) {
+  int i;
+  for(i = 0; args[i] != NULL; i++) {
+    if(strcmp(args[i], ">") == 0) {
+      int fd = open(args[i+1], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      if(fd < 0) {
+        perror("open() error");
+        return 1;
+      }
+      if(dup2(fd, STDOUT_FILENO) < 0) {
+        perror("dup2() error");
+        return 1;
+      }
+      args[i] = NULL;
+      args[i+1] = NULL;
+      return 0;
     }
   }
   return 0;
 }
 
-int background(char *args) {
-  // if user enters & then background process
-  if (strcmp(args[0], "&") == 0) {
-    if (execvp("cat", args) != 0) {
-      perror("cat() error");
-      return 1;
-    }
-  }
-  return 0;
-}
-
-int printBackground(char *args) {
-  // command jobs should print all background processes
-  if (strcmp(args[0], "jobs") == 0) {
-    if (execvp("jobs", args) != 0) {
-      perror("jobs() error");
-      return 1;
+// pipe input from arg before | to arg after |
+int pipe(char **args) {
+  int i;
+  for(i = 0; args[i] != NULL; i++) {
+    if(strcmp(args[i], "|") == 0) {
+      int fd[2];
+      if(pipe(fd) < 0) {
+        perror("pipe() error");
+        return 1;
+      }
+      int pid = fork();
+      if(pid < 0) {
+        perror("fork() error");
+        return 1;
+      }
+      if(pid == 0) {
+        if(dup2(fd[1], STDOUT_FILENO) < 0) {
+          perror("dup2() error");
+          return 1;
+        }
+        args[i] = NULL;
+        args[i+1] = NULL;
+        return execvp(args[0], args);
+      }
+      else {
+        if(dup2(fd[0], STDIN_FILENO) < 0) {
+          perror("dup2() error");
+          return 1;
+        }
+        args[i] = NULL;
+        args[i+1] = NULL;
+        return execvp(args[i+1], args);
+      }
     }
   }
   return 0;
