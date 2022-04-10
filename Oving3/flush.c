@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <errno.h>
 
 #define MAX_SINGLE_ARG_LENGTH 32
 #define MAX_ARG_COUNT 16
@@ -58,9 +59,6 @@ int checkIfIoRedir(char **args) {
   }
   return 0;
 }
-
-
-
 
 int execWithIoRedir(char **args) {
   // exec args with io redirection "<" ">"
@@ -180,19 +178,79 @@ void collectZombies() {
   }
 }
 
-int pipeline(**args) {
-  
-  //check if args contain |
-  int pipeIdx[MAX_ARG_COUNT];
-  int pipeCount = 0;
-  for (int i = 0; args[i] != NULL; i++) {
-    if (strcmp(args[i], "|") == 0) {
-      pipeIdx[pipeCount++] = i;
-    }
-  }
-  
 
+
+int stiansKrok(char **args) {
+
+  int x, k;
+  int j = 0; // antall params
+  int f = 1; // to pipe or not to pipe
+  for (k=0; args[k] != NULL; k++) {  
+      j++;
+      if (strcmp(args[k], "|") == 0) {    
+          f = 0;
+          printf("pipe found\n");
+          break;
+      }               
+  }
+
+  if (f==0) {
+      char argsSize1[k][MAX_SINGLE_ARG_LENGTH];
+      char **argpipe1 = argsSize1;
+      char argsSize2[j-k+1][MAX_SINGLE_ARG_LENGTH];
+      char **argpipe2 = argsSize2;
+      
+      for (x=0; x < k; x++) {    
+        argpipe1[x]=args[x];
+      }
+      argpipe1[x] = NULL;
+
+      int z = 0;     
+      for (x=k+1; x < j; x++) {     
+        argpipe2[z]=args[x];
+        z++;
+      } 
+      argpipe2[z] = NULL;
+      
+      return execpipe(argpipe1, argpipe2);    
+    } else if (f==1) {     
+      return forkAndExec(args);
+    }
 }
+
+// ls | masse kult | epler > text.txt | jensebums
+
+int execpipe (char ** argv1, char ** argv2) {
+    int fds[2];
+    pipe(fds);
+    int i;
+    pid_t pid = fork();
+    if (pid == -1) { //error
+        char *error = strerror(errno);
+        printf("error fork!!\n");
+        return 1;
+    } 
+    if (pid == 0) { // child process
+        close(fds[1]);
+        dup2(fds[0], 0);
+        //close(fds[0]);
+        stiansKrok(argv2); // run command AFTER pipe character in userinput
+        char *error = strerror(errno);
+        printf("Child, unknown command\n");
+        return 0;
+    } else { // parent process
+        close(fds[0]);
+        dup2(fds[1], 1);
+        //close(fds[1]);
+        execvp(argv1[0], argv1); // run command BEFORE pipe character in userinput
+        char *error = strerror(errno);
+        printf("Parent, unknown command\n");
+        return 0;
+    }
+};
+
+
+
 
 int main(/* int argc, char *argv[] */) {
   //set all elements in bgPID to NULL
@@ -259,7 +317,8 @@ int main(/* int argc, char *argv[] */) {
       } else if (strcmp(args[0], "jobs") == 0) {
         exitStat = jobs(args);
       } else {
-        exitStat = forkAndExec(args);
+        //exitStat = forkAndExec(args);
+        exitStat = stiansKrok(args);
       }
 
       if(exitStat == 1) {
