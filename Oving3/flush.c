@@ -2,10 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <errno.h>
 
 #define MAX_SINGLE_ARG_LENGTH 32
 #define MAX_ARG_COUNT 16
@@ -17,13 +17,13 @@ int bgPID[MAX_NUM_BG];
 char **bgArgs = backgroundArgsSize;
 
 
-void printArgs(char **args) {
+void printExitStatus(char **args, int exitStatus) {
     int i;
-    printf("Args: ");
-    for (i = 0; args[i] != NULL; i++) {
+    printf("Exited with status [");
+    for (i = 0; args[i] != 0; i++) {
         printf("%s ", args[i]);
     }
-    printf("\n");
+    printf("]: %d\n", exitStatus);
 }
 
 int cd(char **args) {
@@ -37,20 +37,44 @@ int cd(char **args) {
   return 0;
 }
 
-int jobs(char **args) {
-  collectZombies(); //first collets zombies in order to show the proper list of background jobs
-  //for each element in bgPID, print out the PID and the element at the same index in bgArgs if not NULL
-  int i;
-  printf("All background processes:\n");
-  printf("PID\t\tCommand\n");
-  for(i = 0; i < MAX_NUM_BG; i++) {
-    if(bgPID[i] != 0) {
-      printf("%d\t\t%s\n", bgPID[i], bgArgs[i]);
+void collectZombies() {
+  int status;
+  int pid = waitpid (-1, &status, WNOHANG);
+  while (pid > 0) {
+    for (int i = 0; i < MAX_NUM_BG; i++) {
+      if (bgPID[i] == pid) {
+        printf("Collected zombie with args [%s] and exit status %d\n", bgArgs[i], WEXITSTATUS(status));
+        bgPID[i] = 0;
+        bgArgs[i] = NULL;
+        break;
+      }
     }
+    pid = waitpid (-1, &status, WNOHANG);
   }
 }
 
-//return 1 if input contrains > or <, 0 otherwise
+int jobs(char **args) {
+  collectZombies(); //first collects zombies in order to show the proper list of background jobs
+  //for each element in bgPID, print out the PID and the element at the same index in bgArgs if not NULL
+  int i;
+  int foundCommand = 0;
+  for(i = 0; i < MAX_NUM_BG; i++) {
+    
+    if(bgPID[i] != 0) {
+      if(!foundCommand) {
+        printf("All background processes:\n");
+        printf("PID\t\tCommand\n");
+        foundCommand = 1;
+      }
+      printf("%d\t\t%s\n", bgPID[i], bgArgs[i]);
+    }
+  }
+  if(!foundCommand) {
+    printf("No background processes\n");
+  }
+}
+
+//return 1 if args contains > or <, 0 otherwise
 int checkIfIoRedir(char **args) {
   for(int i = 0; args[i] != NULL; i++) {
     if(strcmp(args[i], "<") == 0 || strcmp(args[i], ">") == 0) {
@@ -60,43 +84,42 @@ int checkIfIoRedir(char **args) {
   return 0;
 }
 
+// exec args with io redirection "<" ">"
 int execWithIoRedir(char **args) {
-  // exec args with io redirection "<" ">"
+
+  // args without "<" ">"
   char argsSize[MAX_ARG_COUNT][MAX_SINGLE_ARG_LENGTH];
-  char **args_clean = argsSize;
-  int cleanidx = 0;
-  int in, out;
+  char **argsClean = argsSize;
+  int argsCleanIndex = 0;
+  int infd, outfd;
 
   for (int j = 0; args[j] != NULL; j++) {
-    if (!strcmp(args[j], "<")) {        // looking for input character
+    if (!strcmp(args[j], "<")) {
       ++j;
-      if ((in = open(args[j], O_RDONLY)) < 0) {   // open file for reading
+      if ((infd = open(args[j], O_RDONLY)) < 0) {
         fprintf(stderr, "error opening file\n");
       }
-      dup2(in, STDIN_FILENO);         // duplicate stdin to input file
-      close(in);                      // close after use
+      dup2(infd, STDIN_FILENO);
+      close(infd);
       continue;
-    }                                   // end input chech
-
-    else if (!strcmp(args[j], ">")) {        // looking for output character
-      ++j;
-      out = creat(args[j], 0644); // create new output file
-      dup2(out, STDOUT_FILENO);       // redirect stdout to file
-      close(out);                     // close after usere
-      continue;
-    }                                   // end output check
-
-  
-    //if args[j] is not &, add to args_clean
-    else if(strcmp(args[j], "&") != 0) {
-      args_clean[cleanidx++] = args[j];
     }
-  }                                     // end loop
+    else if (!strcmp(args[j], ">")) {
+      ++j;
+      outfd = creat(args[j], 0644);
+      dup2(outfd, STDOUT_FILENO);
+      close(outfd);
+      continue;
+    } 
+    //if args[j] is not &, add to argsClean
+    else if(strcmp(args[j], "&") != 0) {
+      argsClean[argsCleanIndex++] = args[j];
+    }
+  }                                  
 
-  args_clean[cleanidx] = NULL;
+  argsClean[argsCleanIndex] = NULL;
 
-  execvp(args_clean[0], args_clean);                  // execute in parent
-  fprintf(stderr, "error in child execi \n"); // error
+  execvp(argsClean[0], argsClean);
+  fprintf(stderr, "error in child exec \n");
   
 }
 
@@ -135,8 +158,8 @@ int forkAndExec(char **args) {
     if(bgJob == 0) {
       int status;
       waitpid ( pid, &status, WUNTRACED);
-      printf("Exit status [%s]: %d\n", args[0], WEXITSTATUS(status));
-    }  else {
+      printExitStatus(args, WEXITSTATUS(status));
+    } else {
       //find first element of bgPid that is NULL and set it to pid
       for (int i = 0; i < MAX_NUM_BG; i++) {
         //printf("%d ", bgPID[i]);
@@ -162,97 +185,9 @@ int forkAndExec(char **args) {
   return 0;
 }
 
-void collectZombies() {
-  int status;
-  int pid = waitpid (-1, &status, WNOHANG);
-  while (pid > 0) {
-    for (int i = 0; i < MAX_NUM_BG; i++) {
-      if (bgPID[i] == pid) {
-        printf("Collected zombie with args [%s] and exit status %d\n", bgArgs[i], WEXITSTATUS(status));
-        bgPID[i] = 0;
-        bgArgs[i] = NULL;
-        break;
-      }
-    }
-    pid = waitpid (-1, &status, WNOHANG);
-  }
-}
 
 
-
-int stiansKrok(char **args) {
-
-  int x, k;
-  int j = 0; // antall params
-  int f = 1; // to pipe or not to pipe
-  for (k=0; args[k] != NULL; k++) {  
-      j++;
-      if (strcmp(args[k], "|") == 0) {    
-          f = 0;
-          printf("pipe found\n");
-          break;
-      }               
-  }
-
-  if (f==0) {
-      char argsSize1[k][MAX_SINGLE_ARG_LENGTH];
-      char **argpipe1 = argsSize1;
-      char argsSize2[j-k+1][MAX_SINGLE_ARG_LENGTH];
-      char **argpipe2 = argsSize2;
-      
-      for (x=0; x < k; x++) {    
-        argpipe1[x]=args[x];
-      }
-      argpipe1[x] = NULL;
-
-      int z = 0;     
-      for (x=k+1; x < j; x++) {     
-        argpipe2[z]=args[x];
-        z++;
-      } 
-      argpipe2[z] = NULL;
-      
-      return execpipe(argpipe1, argpipe2);    
-    } else if (f==1) {     
-      return forkAndExec(args);
-    }
-}
-
-// ls | masse kult | epler > text.txt | jensebums
-
-int execpipe (char ** argv1, char ** argv2) {
-    int fds[2];
-    pipe(fds);
-    int i;
-    pid_t pid = fork();
-    if (pid == -1) { //error
-        char *error = strerror(errno);
-        printf("error fork!!\n");
-        return 1;
-    } 
-    if (pid == 0) { // child process
-        close(fds[1]);
-        dup2(fds[0], 0);
-        //close(fds[0]);
-        stiansKrok(argv2); // run command AFTER pipe character in userinput
-        char *error = strerror(errno);
-        printf("Child, unknown command\n");
-        return 0;
-    } else { // parent process
-        close(fds[0]);
-        dup2(fds[1], 1);
-        //close(fds[1]);
-        execvp(argv1[0], argv1); // run command BEFORE pipe character in userinput
-        char *error = strerror(errno);
-        printf("Parent, unknown command\n");
-        return 0;
-    }
-};
-
-
-
-
-int main(/* int argc, char *argv[] */) {
+int main() {
   //set all elements in bgPID to NULL
   printf("\033[1;31m Welcome to FLUSH ;)\n");
   for (int i = 0; i < MAX_NUM_BG; i++) {
@@ -264,7 +199,6 @@ int main(/* int argc, char *argv[] */) {
     // print the current path
     char cwd[1024];
     if (getcwd(cwd, sizeof(cwd)) != NULL) {
-      //printf("%s : ", cwd);
       printf("\033[1;36m%s: \033[0m", cwd);
     } else {
       perror("getcwd() error");
@@ -272,16 +206,17 @@ int main(/* int argc, char *argv[] */) {
     }
 
     // get input from user
-    
     char input[MAX_INP_LENGTH]; 
-    input[0] = NULL;
+    input[0] = 0;
     fgets(input, MAX_INP_LENGTH, stdin);
 
     // If user inputs ctrl + d: break
-    if(input[0] == NULL) {
+    if(input[0] == 0) {
       printf("\n");
-      break;
+      collectZombies();
+      exit(EXIT_SUCCESS);
     } 
+    // If userinput is empty, continue
     if (input[0] == '\n') {
       continue;
     }
@@ -292,24 +227,19 @@ int main(/* int argc, char *argv[] */) {
     char argsSize[MAX_ARG_COUNT][MAX_SINGLE_ARG_LENGTH];
     char **args = argsSize;
     for(int i = 0; i < MAX_ARG_COUNT; i++)
-      args[i] = NULL;
+      args[i] = 0;
 
     int i = 0;
     char *token = strtok(input, "\t ");
-    while (token != NULL) {
+    while (token != 0) {
       args[i] = token;
       i++;
-      token = strtok(NULL, "\t ");
+      token = strtok(0, "\t ");
     }
 
-    // print the arguments
-    printArgs(args);
-
-    char term = 0x04;
-    char *ter = &term;
+   
     int exitStat = 0;
-    //terminate when user enters control + D
-    if(args[0] != NULL) {
+    if(args[0] != 0) {
       if (strcmp(args[0], "exit") == 0) {
         exitStat = 0;
       } else if (strcmp(args[0], "cd") == 0) {
@@ -317,8 +247,7 @@ int main(/* int argc, char *argv[] */) {
       } else if (strcmp(args[0], "jobs") == 0) {
         exitStat = jobs(args);
       } else {
-        //exitStat = forkAndExec(args);
-        exitStat = stiansKrok(args);
+        exitStat = forkAndExec(args);
       }
 
       if(exitStat == 1) {
@@ -326,14 +255,13 @@ int main(/* int argc, char *argv[] */) {
       }
     }
 
-
-    if (args[0] == NULL || strcmp(args[0], "exit") == 0) {
+    if (args[0] == 0 || strcmp(args[0], "exit") == 0) {
+      collectZombies();
       exit(EXIT_SUCCESS);
     }
     //collects any potential zombies before next input prompt
     collectZombies();
   }
   
-  return EXIT_SUCCESS;
-
+  collectZombies(); // for insurance
 }
